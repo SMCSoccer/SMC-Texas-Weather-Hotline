@@ -25,7 +25,6 @@
                     <i data-lucide="activity" class="w-5 h-5 text-white"></i>
                 </div>
                 <h1 class="text-lg font-bold tracking-tight hidden sm:block uppercase">THE SIGNAL</h1>
-                <span id="adminStatus" class="hidden text-[10px] bg-emerald-500/20 text-emerald-500 px-2 py-0.5 rounded font-bold ml-2">ADMIN</span>
             </div>
 
             <div class="relative flex-1 max-w-xs">
@@ -116,13 +115,6 @@
                         <button type="submit" class="flex-1 bg-emerald-500 hover:bg-emerald-600 text-white py-3 rounded-xl font-bold transition-colors shadow-lg shadow-emerald-500/20">Verify</button>
                     </div>
                 </form>
-                <div class="w-full pt-4 border-t border-slate-800">
-                    <p class="text-xs text-slate-500 mb-4 uppercase tracking-widest">Or Sync with Cloud</p>
-                    <button onclick="window.loginWithGoogle()" class="w-full flex items-center justify-center gap-3 bg-white text-black hover:bg-slate-200 py-3 rounded-xl font-bold transition-colors">
-                        <i data-lucide="log-in" class="w-4 h-4"></i>
-                        Login with Google
-                    </button>
-                </div>
             </div>
         </div>
     </div>
@@ -199,13 +191,6 @@
             limit,
             writeBatch
         } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
-        import { 
-            getAuth, 
-            signInWithPopup, 
-            GoogleAuthProvider, 
-            onAuthStateChanged,
-            signOut 
-        } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
 
         // Firebase Config (from firebase-applet-config.json)
         const firebaseConfig = {
@@ -218,11 +203,9 @@
 
         const app = initializeApp(firebaseConfig);
         const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
-        const auth = getAuth(app);
-        const provider = new GoogleAuthProvider();
 
         // --- Constants & State ---
-        const ADMIN_PASSWORD = 'SIGNAL_ADMIN';
+        const ADMIN_PASSWORD = 'SMCsoccer';
         const DEFAULT_LOCATIONS = [
             { id: 'north-complex', name: 'North Complex', status: 'Green', adminNote: 'All clear. Standard operations in effect.' },
             { id: 'south-complex', name: 'South Complex', status: 'Yellow', adminNote: 'Light rain expected. Monitor drainage systems.' },
@@ -232,7 +215,7 @@
         let locations = [];
         let selectedLocationId = localStorage.getItem('signal_last_location') || 'north-complex';
         let logs = [];
-        let currentUser = null;
+        let isAdminAuthenticated = false; // Local UI state
 
         // --- Core Functions ---
         function saveLocalState() {
@@ -243,7 +226,7 @@
         onSnapshot(collection(db, "locations"), (snapshot) => {
             locations = snapshot.docs.map(doc => doc.data());
             const seedBanner = document.getElementById('seedBanner');
-            if (locations.length === 0 && currentUser && currentUser.email === "zarinsmcsoccer@gmail.com") {
+            if (locations.length === 0 && isAdminAuthenticated) {
                 seedBanner.classList.remove('hidden');
             } else {
                 seedBanner.classList.add('hidden');
@@ -259,36 +242,6 @@
         }, (error) => {
             console.error("Firestore Error (logs):", error);
         });
-
-        onAuthStateChanged(auth, (user) => {
-            currentUser = user;
-            const adminStatus = document.getElementById('adminStatus');
-            const seedBanner = document.getElementById('seedBanner');
-            
-            if (user && user.email === "zarinsmcsoccer@gmail.com") {
-                adminStatus.textContent = "ADMIN";
-                adminStatus.classList.remove('hidden');
-                if (locations.length === 0) seedBanner.classList.remove('hidden');
-            } else {
-                adminStatus.classList.add('hidden');
-                seedBanner.classList.add('hidden');
-            }
-            render();
-        });
-
-        window.loginWithGoogle = async () => {
-            try {
-                await signInWithPopup(auth, provider);
-                closeAuth();
-            } catch (error) {
-                console.error("Login Error:", error);
-                alert("Login failed: " + error.message);
-            }
-        };
-
-        window.logout = () => {
-            signOut(auth);
-        };
 
         function render() {
             const currentLocation = locations.find(l => l.id === selectedLocationId) || locations[0] || DEFAULT_LOCATIONS[0];
@@ -392,9 +345,16 @@
             e.preventDefault();
             const pass = document.getElementById('passwordInput').value;
             if (pass === ADMIN_PASSWORD) {
+                isAdminAuthenticated = true;
                 document.getElementById('authModal').classList.add('hidden');
                 document.getElementById('adminPanel').classList.remove('hidden');
                 document.getElementById('passwordInput').value = '';
+                
+                // Show seed banner if database empty
+                const seedBanner = document.getElementById('seedBanner');
+                if (locations.length === 0) seedBanner.classList.remove('hidden');
+                
+                render();
             } else {
                 alert('Incorrect Password');
             }
