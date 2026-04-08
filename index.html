@@ -25,6 +25,7 @@
                     <i data-lucide="activity" class="w-5 h-5 text-white"></i>
                 </div>
                 <h1 class="text-lg font-bold tracking-tight hidden sm:block uppercase">THE SIGNAL</h1>
+                <span id="adminStatus" class="hidden text-[10px] bg-emerald-500/20 text-emerald-500 px-2 py-0.5 rounded font-bold ml-2">ADMIN</span>
             </div>
 
             <div class="relative flex-1 max-w-xs">
@@ -115,6 +116,13 @@
                         <button type="submit" class="flex-1 bg-emerald-500 hover:bg-emerald-600 text-white py-3 rounded-xl font-bold transition-colors shadow-lg shadow-emerald-500/20">Verify</button>
                     </div>
                 </form>
+                <div class="w-full pt-4 border-t border-slate-800">
+                    <p class="text-xs text-slate-500 mb-4 uppercase tracking-widest">Or Sync with Cloud</p>
+                    <button onclick="window.loginWithGoogle()" class="w-full flex items-center justify-center gap-3 bg-white text-black hover:bg-slate-200 py-3 rounded-xl font-bold transition-colors">
+                        <i data-lucide="log-in" class="w-4 h-4"></i>
+                        Login with Google
+                    </button>
+                </div>
             </div>
         </div>
     </div>
@@ -131,6 +139,11 @@
                 <button onclick="closeAdmin()" class="p-2 hover:bg-slate-800 rounded-full transition-colors">
                     <i data-lucide="x" class="w-5 h-5"></i>
                 </button>
+            </div>
+
+            <div id="seedBanner" class="hidden p-4 bg-amber-500/10 border-b border-amber-500/20 flex items-center justify-between">
+                <p class="text-xs text-amber-500 font-medium">Database is empty. Seed with defaults?</p>
+                <button onclick="window.seedDatabase()" class="text-xs bg-amber-500 text-white px-3 py-1 rounded font-bold">Seed Now</button>
             </div>
 
             <div class="flex-1 overflow-y-auto p-6 space-y-8">
@@ -169,7 +182,45 @@
         </div>
     </div>
 
-    <script>
+    <script type="module">
+        // --- Firebase Integration ---
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
+        import { 
+            getFirestore, 
+            collection, 
+            doc, 
+            setDoc, 
+            addDoc, 
+            updateDoc, 
+            deleteDoc, 
+            onSnapshot, 
+            query, 
+            orderBy, 
+            limit,
+            writeBatch
+        } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+        import { 
+            getAuth, 
+            signInWithPopup, 
+            GoogleAuthProvider, 
+            onAuthStateChanged,
+            signOut 
+        } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
+
+        // Firebase Config (from firebase-applet-config.json)
+        const firebaseConfig = {
+            apiKey: "AIzaSyAPhGadfMK80Nr8KTSpP6sq1qRntDyfFrA",
+            authDomain: "gen-lang-client-0752251253.firebaseapp.com",
+            projectId: "gen-lang-client-0752251253",
+            appId: "1:654654515298:web:7277c4405245cce458893b",
+            firestoreDatabaseId: "ai-studio-131ca3a4-f256-4148-94fb-3c79a8681fef"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
+        const auth = getAuth(app);
+        const provider = new GoogleAuthProvider();
+
         // --- Constants & State ---
         const ADMIN_PASSWORD = 'SIGNAL_ADMIN';
         const DEFAULT_LOCATIONS = [
@@ -178,27 +229,76 @@
             { id: 'elite-showcase', name: 'Elite Showcase', status: 'Red', adminNote: 'Severe thunderstorm warning. Evacuate outdoor areas immediately.' }
         ];
 
-        let locations = JSON.parse(localStorage.getItem('signal_locations')) || DEFAULT_LOCATIONS;
-        let selectedLocationId = localStorage.getItem('signal_last_location') || locations[0].id;
-        let logs = JSON.parse(localStorage.getItem('signal_logs')) || [];
+        let locations = [];
+        let selectedLocationId = localStorage.getItem('signal_last_location') || 'north-complex';
+        let logs = [];
+        let currentUser = null;
 
         // --- Core Functions ---
-        function saveState() {
-            localStorage.setItem('signal_locations', JSON.stringify(locations));
+        function saveLocalState() {
             localStorage.setItem('signal_last_location', selectedLocationId);
-            localStorage.setItem('signal_logs', JSON.stringify(logs));
         }
 
+        // --- Real-time Listeners ---
+        onSnapshot(collection(db, "locations"), (snapshot) => {
+            locations = snapshot.docs.map(doc => doc.data());
+            const seedBanner = document.getElementById('seedBanner');
+            if (locations.length === 0 && currentUser && currentUser.email === "zarinsmcsoccer@gmail.com") {
+                seedBanner.classList.remove('hidden');
+            } else {
+                seedBanner.classList.add('hidden');
+            }
+            render();
+        }, (error) => {
+            console.error("Firestore Error (locations):", error);
+        });
+
+        onSnapshot(query(collection(db, "logs"), orderBy("timestamp", "desc"), limit(50)), (snapshot) => {
+            logs = snapshot.docs.map(doc => doc.data());
+            render();
+        }, (error) => {
+            console.error("Firestore Error (logs):", error);
+        });
+
+        onAuthStateChanged(auth, (user) => {
+            currentUser = user;
+            const adminStatus = document.getElementById('adminStatus');
+            const seedBanner = document.getElementById('seedBanner');
+            
+            if (user && user.email === "zarinsmcsoccer@gmail.com") {
+                adminStatus.textContent = "ADMIN";
+                adminStatus.classList.remove('hidden');
+                if (locations.length === 0) seedBanner.classList.remove('hidden');
+            } else {
+                adminStatus.classList.add('hidden');
+                seedBanner.classList.add('hidden');
+            }
+            render();
+        });
+
+        window.loginWithGoogle = async () => {
+            try {
+                await signInWithPopup(auth, provider);
+                closeAuth();
+            } catch (error) {
+                console.error("Login Error:", error);
+                alert("Login failed: " + error.message);
+            }
+        };
+
+        window.logout = () => {
+            signOut(auth);
+        };
+
         function render() {
-            const currentLocation = locations.find(l => l.id === selectedLocationId) || locations[0];
+            const currentLocation = locations.find(l => l.id === selectedLocationId) || locations[0] || DEFAULT_LOCATIONS[0];
             
             // Update Header Selector
             const selector = document.getElementById('locationSelector');
-            selector.innerHTML = locations.map(l => `<option value="${l.id}" ${l.id === selectedLocationId ? 'selected' : ''}>${l.name}</option>`).join('');
+            selector.innerHTML = (locations.length > 0 ? locations : DEFAULT_LOCATIONS).map(l => `<option value="${l.id}" ${l.id === selectedLocationId ? 'selected' : ''}>${l.name}</option>`).join('');
 
             // Update Status Card
             const card = document.getElementById('statusCard');
-            const badge = document.getElementById('statusBadge');
             const text = document.getElementById('statusText');
             const name = document.getElementById('locationNameDisplay');
             const icon = document.getElementById('statusIcon');
@@ -213,7 +313,7 @@
 
             // Update Logs
             const logContainer = document.getElementById('logContainer');
-            const locationLogs = logs.filter(l => l.locationId === selectedLocationId).sort((a, b) => b.timestamp - a.timestamp).slice(0, 10);
+            const locationLogs = logs.filter(l => l.locationId === selectedLocationId).slice(0, 10);
             
             if (locationLogs.length > 0) {
                 logContainer.innerHTML = locationLogs.map(log => `
@@ -231,22 +331,22 @@
 
             // Update Admin Panel List
             const adminList = document.getElementById('adminLocationList');
-            adminList.innerHTML = locations.map(loc => `
+            adminList.innerHTML = (locations.length > 0 ? locations : DEFAULT_LOCATIONS).map(loc => `
                 <div class="bg-[#1c2128] border border-slate-700 rounded-2xl p-4 space-y-4">
                     <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                         <div class="flex-1">
-                            <input type="text" value="${loc.name}" onchange="updateLocationName('${loc.id}', this.value)" class="bg-transparent border-b border-transparent hover:border-slate-700 focus:border-emerald-500 focus:outline-none font-bold text-lg w-full transition-colors">
+                            <input type="text" value="${loc.name}" onchange="window.updateLocationName('${loc.id}', this.value)" class="bg-transparent border-b border-transparent hover:border-slate-700 focus:border-emerald-500 focus:outline-none font-bold text-lg w-full transition-colors">
                         </div>
                         <div class="flex items-center gap-2">
                             <div class="flex bg-[#0f1115] rounded-lg p-1 gap-1">
                                 ${['Green', 'Yellow', 'Red'].map(s => `
-                                    <button onclick="updateLocationStatus('${loc.id}', '${s}')" class="px-3 py-1 rounded-md text-xs font-bold transition-all ${loc.status === s ? getStatusBg(s) + ' text-white shadow-lg' : 'text-slate-500 hover:text-slate-300'}">${s}</button>
+                                    <button onclick="window.updateLocationStatus('${loc.id}', '${s}')" class="px-3 py-1 rounded-md text-xs font-bold transition-all ${loc.status === s ? getStatusBg(s) + ' text-white shadow-lg' : 'text-slate-500 hover:text-slate-300'}">${s}</button>
                                 `).join('')}
                             </div>
-                            <button onclick="deleteLocation('${loc.id}')" class="p-2 hover:bg-rose-500/20 text-rose-500 rounded-lg transition-colors"><i data-lucide="trash-2" class="w-4 h-4"></i></button>
+                            <button onclick="window.deleteLocation('${loc.id}')" class="p-2 hover:bg-rose-500/20 text-rose-500 rounded-lg transition-colors"><i data-lucide="trash-2" class="w-4 h-4"></i></button>
                         </div>
                     </div>
-                    <textarea onchange="updateLocationNote('${loc.id}', this.value)" placeholder="Enter admin note..." class="w-full bg-[#0f1115] border border-slate-700 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/50 min-h-[80px] resize-none">${loc.adminNote}</textarea>
+                    <textarea onchange="window.updateLocationNote('${loc.id}', this.value)" placeholder="Enter admin note..." class="w-full bg-[#0f1115] border border-slate-700 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/50 min-h-[80px] resize-none">${loc.adminNote}</textarea>
                 </div>
             `).join('');
 
@@ -268,12 +368,12 @@
         // --- Event Handlers ---
         document.getElementById('locationSelector').addEventListener('change', (e) => {
             selectedLocationId = e.target.value;
-            saveState();
+            saveLocalState();
             render();
         });
 
         document.getElementById('playBriefingBtn').addEventListener('click', () => {
-            const currentLocation = locations.find(l => l.id === selectedLocationId);
+            const currentLocation = locations.find(l => l.id === selectedLocationId) || DEFAULT_LOCATIONS[0];
             if ('speechSynthesis' in window) {
                 window.speechSynthesis.cancel();
                 const utterance = new SpeechSynthesisUtterance(`Weather briefing for ${currentLocation.name}. Status is ${currentLocation.status}. Note: ${currentLocation.adminNote}`);
@@ -300,71 +400,117 @@
             }
         });
 
-        function closeAuth() { document.getElementById('authModal').classList.add('hidden'); }
-        function closeAdmin() { document.getElementById('adminPanel').classList.add('hidden'); }
+        window.closeAuth = () => { document.getElementById('authModal').classList.add('hidden'); }
+        window.closeAdmin = () => { document.getElementById('adminPanel').classList.add('hidden'); }
 
-        function updateLocationStatus(id, newStatus) {
+        window.updateLocationStatus = async (id, newStatus) => {
             const loc = locations.find(l => l.id === id);
-            if (loc.status !== newStatus) {
-                logs.unshift({ id: Math.random().toString(36).substr(2, 9), locationId: id, oldStatus: loc.status, newStatus, timestamp: Date.now() });
-                loc.status = newStatus;
-                saveState();
-                render();
+            if (loc && loc.status !== newStatus) {
+                try {
+                    const logId = Math.random().toString(36).substr(2, 9);
+                    const logData = { id: logId, locationId: id, oldStatus: loc.status, newStatus, timestamp: Date.now() };
+                    
+                    await setDoc(doc(db, "locations", id), { ...loc, status: newStatus });
+                    await setDoc(doc(db, "logs", logId), logData);
+                } catch (error) {
+                    console.error("Update Error:", error);
+                    alert("Permission denied. Please login as admin.");
+                }
             }
         }
 
-        function updateLocationName(id, newName) {
+        window.updateLocationName = async (id, newName) => {
             const loc = locations.find(l => l.id === id);
-            loc.name = newName;
-            saveState();
-            render();
-        }
-
-        function updateLocationNote(id, newNote) {
-            const loc = locations.find(l => l.id === id);
-            loc.adminNote = newNote;
-            saveState();
-            render();
-        }
-
-        function globalOverride(status) {
-            locations.forEach(loc => {
-                if (loc.status !== status) {
-                    logs.unshift({ id: Math.random().toString(36).substr(2, 9), locationId: loc.id, oldStatus: loc.status, newStatus: status, timestamp: Date.now() });
-                    loc.status = status;
+            if (loc) {
+                try {
+                    await updateDoc(doc(db, "locations", id), { name: newName });
+                } catch (error) {
+                    console.error("Update Error:", error);
+                    alert("Permission denied.");
                 }
-            });
-            saveState();
-            render();
+            }
         }
 
-        function addLocation() {
+        window.updateLocationNote = async (id, newNote) => {
+            const loc = locations.find(l => l.id === id);
+            if (loc) {
+                try {
+                    await updateDoc(doc(db, "locations", id), { adminNote: newNote });
+                } catch (error) {
+                    console.error("Update Error:", error);
+                    alert("Permission denied.");
+                }
+            }
+        }
+
+        window.globalOverride = async (status) => {
+            try {
+                const batch = writeBatch(db);
+                locations.forEach(loc => {
+                    if (loc.status !== status) {
+                        const logId = Math.random().toString(36).substr(2, 9);
+                        batch.set(doc(db, "locations", loc.id), { ...loc, status: status });
+                        batch.set(doc(db, "logs", logId), { id: logId, locationId: loc.id, oldStatus: loc.status, newStatus: status, timestamp: Date.now() });
+                    }
+                });
+                await batch.commit();
+            } catch (error) {
+                console.error("Override Error:", error);
+                alert("Permission denied.");
+            }
+        }
+
+        window.addLocation = async () => {
             const name = document.getElementById('newLocationName').value.trim();
             if (!name) return;
+            const id = Math.random().toString(36).substr(2, 9);
             const newLoc = {
-                id: Math.random().toString(36).substr(2, 9),
+                id: id,
                 name: name,
                 status: 'Green',
                 adminNote: 'New complex added.'
             };
-            locations.push(newLoc);
-            document.getElementById('newLocationName').value = '';
-            saveState();
-            render();
-        }
-
-        function deleteLocation(id) {
-            if (locations.length <= 1) return alert("At least one location must remain.");
-            if (confirm("Delete this complex?")) {
-                locations = locations.filter(l => l.id !== id);
-                if (selectedLocationId === id) selectedLocationId = locations[0].id;
-                saveState();
-                render();
+            try {
+                await setDoc(doc(db, "locations", id), newLoc);
+                document.getElementById('newLocationName').value = '';
+            } catch (error) {
+                console.error("Add Error:", error);
+                alert("Permission denied.");
             }
         }
+
+        window.deleteLocation = async (id) => {
+            if (locations.length <= 1) return alert("At least one location must remain.");
+            if (confirm("Delete this complex?")) {
+                try {
+                    await deleteDoc(doc(db, "locations", id));
+                    if (selectedLocationId === id) selectedLocationId = locations[0].id;
+                    saveLocalState();
+                } catch (error) {
+                    console.error("Delete Error:", error);
+                    alert("Permission denied.");
+                }
+            }
+        }
+
+        // Seeding function (run manually or on first load if admin)
+        window.seedDatabase = async () => {
+            try {
+                const batch = writeBatch(db);
+                DEFAULT_LOCATIONS.forEach(loc => {
+                    batch.set(doc(db, "locations", loc.id), loc);
+                });
+                await batch.commit();
+                alert("Database seeded!");
+            } catch (error) {
+                console.error("Seed Error:", error);
+                alert("Seed failed. Are you logged in as admin?");
+            }
+        };
 
         // Initial Render
         render();
     </script>
+
 </body>
 </html>
