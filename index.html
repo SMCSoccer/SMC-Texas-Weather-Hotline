@@ -306,17 +306,35 @@
             const locationLogs = logs.filter(l => l.locationId === selectedLocationId && l.timestamp > seventyTwoHoursAgo);
             
             if (locationLogs.length > 0) {
-                logContainer.innerHTML = locationLogs.map(log => `
-                    <div class="p-4 flex items-center justify-between text-sm">
-                        <div class="flex items-center gap-3">
-                            <div class="w-2 h-2 rounded-full ${getStatusBg(log.newStatus)}"></div>
-                            <span class="font-medium">Changed from <span class="text-slate-500">${log.oldStatus}</span> to <span class="font-bold">${log.newStatus}</span></span>
+                logContainer.innerHTML = locationLogs.map(log => {
+                    let logContent = '';
+                    const isStatusChange = log.type === 'status' || (!log.type && log.newStatus);
+                    
+                    if (isStatusChange) {
+                        logContent = `
+                            <div class="flex items-center gap-3">
+                                <div class="w-2 h-2 rounded-full ${getStatusBg(log.newStatus)}"></div>
+                                <span class="font-medium">Status: <span class="text-slate-500">${log.oldStatus}</span> → <span class="font-bold">${log.newStatus}</span></span>
+                            </div>
+                        `;
+                    } else if (log.type === 'note') {
+                        logContent = `
+                            <div class="flex items-center gap-3">
+                                <div class="w-2 h-2 rounded-full bg-slate-500"></div>
+                                <span class="font-medium">Note: <span class="text-slate-400 italic">"${log.newNote}"</span></span>
+                            </div>
+                        `;
+                    }
+
+                    return `
+                        <div class="p-4 flex items-center justify-between text-sm">
+                            ${logContent}
+                            <span class="text-xs text-slate-500 font-mono">${new Date(log.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                         </div>
-                        <span class="text-xs text-slate-500 font-mono">${new Date(log.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-                    </div>
-                `).join('');
+                    `;
+                }).join('');
             } else {
-                logContainer.innerHTML = `<div class="p-8 text-center text-slate-500 italic text-sm">No recent status changes for this location.</div>`;
+                logContainer.innerHTML = `<div class="p-8 text-center text-slate-500 italic text-sm">No recent activity for this location.</div>`;
             }
 
             // Update Admin Panel List
@@ -405,7 +423,14 @@
             if (loc && loc.status !== newStatus) {
                 try {
                     const logId = Math.random().toString(36).substr(2, 9);
-                    const logData = { id: logId, locationId: id, oldStatus: loc.status, newStatus, timestamp: Date.now() };
+                    const logData = { 
+                        id: logId, 
+                        locationId: id, 
+                        type: 'status',
+                        oldStatus: loc.status, 
+                        newStatus, 
+                        timestamp: Date.now() 
+                    };
                     
                     await setDoc(doc(db, "locations", id), { ...loc, status: newStatus });
                     await setDoc(doc(db, "logs", logId), logData);
@@ -430,9 +455,19 @@
 
         window.updateLocationNote = async (id, newNote) => {
             const loc = locations.find(l => l.id === id);
-            if (loc) {
+            if (loc && loc.adminNote !== newNote) {
                 try {
+                    const logId = Math.random().toString(36).substr(2, 9);
+                    const logData = { 
+                        id: logId, 
+                        locationId: id, 
+                        type: 'note',
+                        oldNote: loc.adminNote, 
+                        newNote, 
+                        timestamp: Date.now() 
+                    };
                     await updateDoc(doc(db, "locations", id), { adminNote: newNote });
+                    await setDoc(doc(db, "logs", logId), logData);
                 } catch (error) {
                     console.error("Update Error:", error);
                     alert("Permission denied.");
@@ -447,7 +482,14 @@
                     if (loc.status !== status) {
                         const logId = Math.random().toString(36).substr(2, 9);
                         batch.set(doc(db, "locations", loc.id), { ...loc, status: status });
-                        batch.set(doc(db, "logs", logId), { id: logId, locationId: loc.id, oldStatus: loc.status, newStatus: status, timestamp: Date.now() });
+                        batch.set(doc(db, "logs", logId), { 
+                            id: logId, 
+                            locationId: loc.id, 
+                            type: 'status',
+                            oldStatus: loc.status, 
+                            newStatus: status, 
+                            timestamp: Date.now() 
+                        });
                     }
                 });
                 await batch.commit();
